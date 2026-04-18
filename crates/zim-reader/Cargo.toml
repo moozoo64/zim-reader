@@ -1,0 +1,16 @@
+[package]
+name = "zim-reader"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Pure-Rust library for reading ZIM archive files"
+license = "MIT OR Apache-2.0"
+keywords = ["zim", "wikipedia", "kiwix", "openzim", "offline"]
+categories = ["encoding", "parsing"]
+
+[dependencies]
+memmap2 = "0.9"
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"
