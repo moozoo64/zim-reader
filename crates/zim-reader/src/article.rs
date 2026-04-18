@@ -5,7 +5,11 @@ use crate::dirent::ContentEntry;
 /// bytes. Produced by [`Archive::get_article`] and [`Archive::main_page`].
 #[derive(Debug, Clone)]
 pub struct Article {
+    /// Content dirent this article resolves to. When the caller-provided
+    /// path was a redirect, this is the final target after chain
+    /// resolution, not the original alias.
     pub entry: ContentEntry,
+    /// Decompressed blob bytes.
     pub data: Vec<u8>,
 }
 

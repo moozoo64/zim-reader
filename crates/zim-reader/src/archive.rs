@@ -29,7 +29,9 @@ pub(crate) struct ClusterData {
 /// Whether to verify the archive's MD5 checksum when opening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyChecksum {
+    /// Stream the file body through MD5 and compare to the stored digest.
     Yes,
+    /// Skip verification. Faster on large archives already verified elsewhere.
     Skip,
 }
 
@@ -38,14 +40,16 @@ pub enum VerifyChecksum {
 pub struct ArchiveOptions {
     /// Whether to verify the MD5 checksum on open.
     ///
-    /// Currently ignored; checksum verification is implemented in a later
-    /// release. The field is accepted now so callers don't need to migrate
-    /// once enforcement is added.
+    /// When `Yes` (the default), the body of the file is streamed through
+    /// MD5 and compared to the 16-byte trailing digest. Mismatches return
+    /// [`Error::ChecksumMismatch`]. Set to `Skip` for large archives where
+    /// the checksum has already been verified separately.
     pub verify_checksum: VerifyChecksum,
 
     /// Maximum number of decompressed clusters to hold in the LRU cache.
     ///
-    /// Currently unused; the cluster cache is implemented in a later release.
+    /// Defaults to 8. Increase for workloads that fan out across many
+    /// clusters; decrease to bound memory when clusters are very large.
     pub cluster_cache_size: usize,
 }
 
@@ -95,6 +99,10 @@ impl Archive {
         let header = Header::parse(&mmap[..HEADER_SIZE])?;
         validate_offsets(&header, mmap.len() as u64)?;
 
+        if opts.verify_checksum == VerifyChecksum::Yes {
+            verify_md5(&mmap, header.checksum_pos)?;
+        }
+
         let mime_types = parse_mime_table(&mmap, header.mime_list_pos)?;
         let namespace_mode = detect_namespace_mode(&header);
 
@@ -111,26 +119,34 @@ impl Archive {
         })
     }
 
+    /// Parsed 80-byte header.
     pub fn header(&self) -> &Header {
         &self.header
     }
 
+    /// Filesystem path the archive was opened from.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
+    /// Number of directory entries in the archive (including deprecated
+    /// entries, which callers still see through [`Archive::dirent_at`] as
+    /// `Ok(None)`).
     pub fn entry_count(&self) -> u32 {
         self.header.entry_count
     }
 
+    /// Number of clusters in the archive.
     pub fn cluster_count(&self) -> u32 {
         self.header.cluster_count
     }
 
+    /// MIME type strings indexed by [`ContentEntry::mime_type_idx`].
     pub fn mime_types(&self) -> &[String] {
         &self.mime_types
     }
 
+    /// Namespace convention this archive uses (New for v6.1+, Legacy otherwise).
     pub fn namespace_mode(&self) -> NamespaceMode {
         self.namespace_mode
     }
@@ -292,9 +308,9 @@ impl Archive {
     }
 
     /// Follow a redirect chain to its final content entry. Returns
-    /// [`Error::RedirectLoop`] on a cycle or after [`MAX_REDIRECT_DEPTH`]
-    /// hops, and [`Error::RedirectIndexOutOfRange`] when the chain lands on
-    /// a missing or deprecated entry.
+    /// [`Error::RedirectLoop`] on a cycle or after 8 hops, and
+    /// [`Error::RedirectIndexOutOfRange`] when the chain lands on a
+    /// missing or deprecated entry.
     pub fn resolve_redirect(&self, entry: &RedirectEntry) -> Result<ContentEntry> {
         let mut visited: HashSet<u32> = HashSet::new();
         let mut current = entry.redirect_index;
@@ -513,6 +529,42 @@ fn check_in_bounds(offset: u64, file_len: u64, field: &'static str) -> Result<()
     Ok(())
 }
 
+fn verify_md5(mmap: &[u8], checksum_pos: u64) -> Result<()> {
+    use md5::{Digest, Md5};
+
+    let body_end = checksum_pos as usize;
+    let stored = &mmap[body_end..body_end + 16];
+
+    let mut hasher = Md5::new();
+    // Stream in 4 MB chunks: the mmap already handles paging, but a bounded
+    // working set is friendlier to the CPU cache on large archives.
+    const CHUNK: usize = 4 * 1024 * 1024;
+    let mut pos = 0usize;
+    while pos < body_end {
+        let end = (pos + CHUNK).min(body_end);
+        hasher.update(&mmap[pos..end]);
+        pos = end;
+    }
+    let actual = hasher.finalize();
+
+    if actual.as_slice() != stored {
+        return Err(Error::ChecksumMismatch {
+            expected: hex_encode(stored),
+            actual: hex_encode(&actual),
+        });
+    }
+    Ok(())
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,9 +609,17 @@ mod tests {
         }
         buf.push(0);
         buf.resize(padding_end, 0);
-        buf.extend_from_slice(&[0u8; 16]);
+        append_md5_trailer(&mut buf);
         assert_eq!(buf.len(), file_len);
         buf
+    }
+
+    /// Compute the MD5 of `buf` (the body) and append it as the 16-byte
+    /// checksum trailer.
+    fn append_md5_trailer(buf: &mut Vec<u8>) {
+        use md5::{Digest, Md5};
+        let digest = Md5::digest(&buf[..]);
+        buf.extend_from_slice(&digest);
     }
 
     fn write_tempfile(bytes: &[u8]) -> NamedTempFile {
@@ -996,7 +1056,7 @@ mod tests {
             buf.extend_from_slice(c);
         }
         assert_eq!(buf.len() as u64, checksum_pos);
-        buf.extend_from_slice(&[0u8; 16]);
+        append_md5_trailer(&mut buf);
         assert_eq!(buf.len() as u64, file_len);
         buf
     }
@@ -1619,5 +1679,137 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    // ── Phase 4: checksum verification and v6 edge cases ─────────────────
+
+    #[test]
+    fn verify_md5_accepts_valid_archive() {
+        // Default options enable checksum verification; every happy-path
+        // test already exercises it, but this test makes the contract
+        // explicit.
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[content_at('C', "p", "", 0, 0, 0)],
+            &[uncompressed_cluster(&[b"body"])],
+            None,
+        );
+        let f = write_tempfile(&bytes);
+        let a = Archive::open_with_options(
+            f.path(),
+            ArchiveOptions {
+                verify_checksum: VerifyChecksum::Yes,
+                ..Default::default()
+            },
+        )
+        .expect("valid archive opens with checksum on");
+        assert_eq!(a.entry_count(), 1);
+    }
+
+    #[test]
+    fn verify_md5_rejects_tampered_body() {
+        let mut bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[content_at('C', "p", "", 0, 0, 0)],
+            &[uncompressed_cluster(&[b"body"])],
+            None,
+        );
+        // Flip the last byte of the body (just before the 16-byte digest).
+        // This sits inside the cluster region, which `open` does not read,
+        // so the failure must come from the checksum comparison itself.
+        let n = bytes.len();
+        bytes[n - 17] ^= 0xFF;
+        let f = write_tempfile(&bytes);
+        assert!(matches!(
+            Archive::open(f.path()),
+            Err(Error::ChecksumMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn verify_md5_rejects_tampered_digest() {
+        let mut bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[content_at('C', "p", "", 0, 0, 0)],
+            &[uncompressed_cluster(&[b"body"])],
+            None,
+        );
+        let n = bytes.len();
+        bytes[n - 1] ^= 0xFF;
+        let f = write_tempfile(&bytes);
+        assert!(matches!(
+            Archive::open(f.path()),
+            Err(Error::ChecksumMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn verify_checksum_skip_bypasses_verification() {
+        let mut bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[content_at('C', "p", "", 0, 0, 0)],
+            &[uncompressed_cluster(&[b"body"])],
+            None,
+        );
+        // Corrupt a body byte that open() does not otherwise read; with
+        // Skip, the archive must still open cleanly.
+        let n = bytes.len();
+        bytes[n - 17] ^= 0xFF;
+        let f = write_tempfile(&bytes);
+        let a = Archive::open_with_options(
+            f.path(),
+            ArchiveOptions {
+                verify_checksum: VerifyChecksum::Skip,
+                ..Default::default()
+            },
+        )
+        .expect("Skip bypasses checksum");
+        assert_eq!(a.entry_count(), 1);
+    }
+
+    #[test]
+    fn alias_entries_return_same_bytes() {
+        // v6.2 allows two content dirents to share a (cluster, blob). Build
+        // two distinct paths pointing at cluster 0 blob 0 and confirm both
+        // resolve to identical bytes.
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[
+                content_at('C', "Alpha", "", 0, 0, 0),
+                content_at('C', "Bravo", "", 0, 0, 0),
+            ],
+            &[uncompressed_cluster(&[b"shared body bytes"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let alpha = a.get_article("Alpha").unwrap().unwrap();
+        let bravo = a.get_article("Bravo").unwrap().unwrap();
+        assert_eq!(alpha.data, b"shared body bytes");
+        assert_eq!(alpha.data, bravo.data);
+        assert_ne!(alpha.entry.path, bravo.entry.path);
+    }
+
+    #[test]
+    fn empty_title_list_search_returns_none() {
+        // v6.3 archives may omit the title pointer list entirely. The
+        // current binary-search code is already safe when entry_count == 0
+        // (the `while lo < hi` loop body never executes). This is a pure
+        // regression test — no production code change expected.
+        let bytes = build_zim_full(6, 1, &["text/html"], &[], &[], None);
+        let (_f, a) = open_bytes(&bytes);
+        assert_eq!(a.entry_count(), 0);
+        assert!(a.search_title('C', "anything").unwrap().is_none());
+        assert!(a.search_title_prefix('C', "any", 10).unwrap().is_empty());
+        assert!(a.find_by_title(None, "anything").unwrap().is_none());
     }
 }

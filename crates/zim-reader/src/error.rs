@@ -1,5 +1,10 @@
 use thiserror::Error;
 
+/// Errors returned by `zim-reader`.
+///
+/// Variants cover I/O failures, malformed headers or dirents, out-of-range
+/// offsets, decompression errors, and MD5 mismatch. The `#[error]` message
+/// on each variant is the user-facing description.
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("I/O error: {0}")]

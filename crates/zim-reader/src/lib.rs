@@ -1,9 +1,11 @@
-//! A pure-Rust, read-only library for [ZIM archive files].
+//! A pure-Rust, read-only library for [ZIM archive files] — the offline
+//! content format used by [Kiwix] for Wikipedia, Wiktionary, Stack Exchange,
+//! and similar wiki-style corpora.
 //!
-//! Phase 1 scope: open a ZIM file, parse the 80-byte header, read the MIME
-//! type list, and detect the archive's namespace convention. Directory-entry
-//! parsing, binary search, cluster decompression, and checksum verification
-//! are implemented in subsequent phases.
+//! An [`Archive`] is opened by memory-mapping a `.zim` file. Parsing is
+//! lazy: header, MIME list, and namespace mode are resolved at open time;
+//! dirents, clusters, and blobs are read on demand. Decompressed clusters
+//! are cached in a fixed-size LRU.
 //!
 //! # Quick start
 //!
@@ -11,16 +13,19 @@
 //! use zim_reader::Archive;
 //!
 //! let archive = Archive::open("wikipedia.zim")?;
-//! println!("version {}.{}", archive.header().major_version, archive.header().minor_version);
-//! println!("{} MIME types, {} entries, {} clusters",
-//!     archive.mime_types().len(),
-//!     archive.entry_count(),
-//!     archive.cluster_count(),
-//! );
+//! if let Some(article) = archive.get_article("A/Rust_(programming_language)")? {
+//!     println!("{} bytes, mime: {}", article.data.len(), article.mime_type(&archive));
+//! }
 //! # Ok::<(), zim_reader::Error>(())
 //! ```
 //!
+//! # Features
+//!
+//! - `compression-pure` (default): pure-Rust LZMA2 and Zstandard decoders
+//!   via `lzma-rs` and `ruzstd`.
+//!
 //! [ZIM archive files]: https://wiki.openzim.org/wiki/ZIM_file_format
+//! [Kiwix]: https://www.kiwix.org/
 
 mod archive;
 mod article;

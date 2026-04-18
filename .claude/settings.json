@@ -5,7 +5,8 @@
       "Bash(cargo test *)",
       "Bash(cargo clippy *)",
       "Bash(cargo fmt *)",
-      "Bash(grep -vE '^\\(target/|crates/|docs/|\\\\.claude/|Cargo\\\\.\\(toml|lock\\)$|\\\\.gitignore$|CLAUDE\\\\.md$|README\\\\.md$\\)')"
+      "Bash(grep -vE '^\\(target/|crates/|docs/|\\\\.claude/|Cargo\\\\.\\(toml|lock\\)$|\\\\.gitignore$|CLAUDE\\\\.md$|README\\\\.md$\\)')",
+      "Bash(cargo doc *)"
     ],
     "additionalDirectories": [
       "/home/michael-simmons/.claude/plans"

@@ -12,6 +12,7 @@ categories = ["encoding", "parsing"]
 memmap2 = "0.9"
 thiserror = "1"
 lru = "0.12"
+md-5 = "0.10"
 lzma-rs = { version = "0.3", optional = true }
 ruzstd = { version = "0.7", optional = true }
 

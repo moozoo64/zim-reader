@@ -9,6 +9,12 @@ pub enum NamespaceMode {
     Legacy,
 }
 
+/// Symbolic namespace kind, independent of the archive's mode.
+///
+/// Most callers should work with [`article_namespace`] and
+/// [`metadata_namespace`] directly; this enum is provided as a vocabulary
+/// for code that needs to tag entries by role without caring whether the
+/// archive is v5 or v6.1+.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Namespace {
     /// `C` in New mode, `A` in Legacy mode.
@@ -21,6 +27,7 @@ pub enum Namespace {
     WellKnown,
     /// `X` — Xapian full-text search index.
     Search,
+    /// Any other namespace character the archive exposes.
     Other(char),
 }
 

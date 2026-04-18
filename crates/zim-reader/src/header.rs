@@ -5,20 +5,43 @@ pub(crate) const HEADER_SIZE: usize = 80;
 pub(crate) const ZIM_MAGIC: u32 = 0x044D_495A;
 const U32_ABSENT: u32 = 0xFFFF_FFFF;
 
+/// The 80-byte ZIM file header.
+///
+/// Parsed once at archive open. All offsets are byte positions from the
+/// start of the file.
 #[derive(Debug, Clone)]
 pub struct Header {
+    /// Fixed magic number `0x044D495A` identifying the file as a ZIM archive.
     pub magic_number: u32,
+    /// Major version. Supported values are `5` and `6`.
     pub major_version: u16,
+    /// Minor version. On major `6`, values `>= 1` select the "New" namespace
+    /// convention (see [`crate::NamespaceMode`]).
     pub minor_version: u16,
+    /// Archive-wide UUID. Stable across copies of the same archive.
     pub uuid: [u8; 16],
+    /// Number of directory entries in the path and title pointer lists.
     pub entry_count: u32,
+    /// Number of clusters in the cluster pointer list.
     pub cluster_count: u32,
+    /// File offset of the path pointer list (u64 entries, one per dirent).
     pub path_ptr_pos: u64,
+    /// File offset of the title pointer list (u32 entries, each indexing
+    /// into the path pointer list).
     pub title_ptr_pos: u64,
+    /// File offset of the cluster pointer list (u64 entries, one per cluster).
     pub cluster_ptr_pos: u64,
+    /// File offset of the MIME type list. Always `80` — the MIME list
+    /// immediately follows the header.
     pub mime_list_pos: u64,
+    /// Entry index of the main page, or `None` when the on-disk sentinel
+    /// `0xFFFFFFFF` indicates no main page.
     pub main_page: Option<u32>,
+    /// Entry index of the layout page, or `None` when the on-disk sentinel
+    /// `0xFFFFFFFF` indicates no layout page.
     pub layout_page: Option<u32>,
+    /// File offset of the 16-byte MD5 checksum trailer. Equal to
+    /// `file_len - 16`.
     pub checksum_pos: u64,
 }
 

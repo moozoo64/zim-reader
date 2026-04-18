@@ -6,7 +6,7 @@ A pure-Rust, read-only library for [ZIM archive files] — the offline content f
 
 ## Status
 
-Early, usable. Phase 3 of the implementation plan is complete:
+Early, usable. Phase 4 of the implementation plan is complete:
 
 - [x] Header, MIME list, and namespace detection (v5 and v6)
 - [x] Directory-entry parsing (content + redirect)
@@ -15,9 +15,9 @@ Early, usable. Phase 3 of the implementation plan is complete:
 - [x] Blob extraction (standard u32 and extended u64 offsets)
 - [x] `get_article`, `main_page`, `metadata`, redirect resolution with cycle detection
 - [x] LRU cluster cache
-- [ ] MD5 checksum verification (Phase 4)
-- [ ] Optional native codecs (`xz2`, `zstd` as runtime deps) (Phase 4)
-- [ ] Split-archive read support beyond detection (Phase 4)
+- [x] MD5 checksum verification (streamed, opt-out via `VerifyChecksum::Skip`)
+- [ ] Optional native codecs (`xz2`, `zstd` as runtime deps) (future phase)
+- [ ] Split-archive read support beyond detection (future phase)
 
 ## Quick start
 

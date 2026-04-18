@@ -8,33 +8,56 @@ const MIME_DELETED: u16 = 0xFFFD;
 const CONTENT_PATH_OFFSET: usize = 16;
 const REDIRECT_PATH_OFFSET: usize = 12;
 
+/// A directory entry: either a content entry pointing at a blob in a
+/// cluster, or a redirect pointing at another entry.
+///
+/// Deprecated entries (linktargets, deleted placeholders) are not
+/// represented here — parsing code returns `None` for them, and callers
+/// skip them.
 #[derive(Debug, Clone)]
 pub enum Dirent {
+    /// A content entry: path + title + location of its blob.
     Content(ContentEntry),
+    /// A redirect entry: path + title + index of the target dirent.
     Redirect(RedirectEntry),
 }
 
+/// A directory entry pointing at an actual piece of content.
 #[derive(Debug, Clone)]
 pub struct ContentEntry {
+    /// Index into the archive's MIME table.
     pub mime_type_idx: u16,
+    /// Single-character namespace (e.g. `C` in v6.1+, `A` in v5).
     pub namespace: char,
+    /// Revision number, unused by most archives (typically `0`).
     pub revision: u32,
+    /// Cluster holding this entry's blob.
     pub cluster_number: u32,
+    /// Blob index within `cluster_number`.
     pub blob_number: u32,
+    /// URL-safe path, unique within `namespace`.
     pub path: String,
+    /// Human-readable title. Falls back to `path` when the stored title is empty.
     pub title: String,
 }
 
+/// A directory entry that redirects to another dirent.
 #[derive(Debug, Clone)]
 pub struct RedirectEntry {
+    /// Namespace of this redirect (not of the target).
     pub namespace: char,
+    /// Revision number, unused by most archives (typically `0`).
     pub revision: u32,
+    /// Entry index of the redirect target in the path pointer list.
     pub redirect_index: u32,
+    /// URL-safe path of this redirect.
     pub path: String,
+    /// Human-readable title. Falls back to `path` when the stored title is empty.
     pub title: String,
 }
 
 impl Dirent {
+    /// Namespace character of this entry.
     pub fn namespace(&self) -> char {
         match self {
             Dirent::Content(c) => c.namespace,
@@ -42,6 +65,7 @@ impl Dirent {
         }
     }
 
+    /// URL-safe path of this entry.
     pub fn path(&self) -> &str {
         match self {
             Dirent::Content(c) => &c.path,
@@ -49,6 +73,7 @@ impl Dirent {
         }
     }
 
+    /// Human-readable title of this entry (falls back to path when absent).
     pub fn title(&self) -> &str {
         match self {
             Dirent::Content(c) => &c.title,
