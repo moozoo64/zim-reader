@@ -23,13 +23,16 @@
 //! [ZIM archive files]: https://wiki.openzim.org/wiki/ZIM_file_format
 
 mod archive;
+mod dirent;
 mod error;
 mod header;
 mod mime;
 mod namespace;
+mod pointer_list;
 mod util;
 
-pub use archive::{Archive, ArchiveOptions, VerifyChecksum};
+pub use archive::{Archive, ArchiveOptions, ArticleIter, EntryIter, VerifyChecksum};
+pub use dirent::{ContentEntry, Dirent, RedirectEntry};
 pub use error::{Error, Result};
 pub use header::Header;
 pub use namespace::{article_namespace, metadata_namespace, Namespace, NamespaceMode};
