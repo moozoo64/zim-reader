@@ -1,15 +1,30 @@
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fs::File;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
+use lru::LruCache;
 use memmap2::{Mmap, MmapOptions};
 
-use crate::dirent::{read_path_sort_key, read_title_sort_key, ContentEntry, Dirent};
+use crate::article::Article;
+use crate::cluster::{decompress, extract_blob, ClusterInfo};
+use crate::dirent::{read_path_sort_key, read_title_sort_key, ContentEntry, Dirent, RedirectEntry};
 use crate::error::{Error, Result};
 use crate::header::{Header, HEADER_SIZE};
 use crate::mime::parse_mime_table;
-use crate::namespace::{article_namespace, detect_namespace_mode, NamespaceMode};
-use crate::pointer_list::{path_ptr, title_ptr};
+use crate::namespace::{
+    article_namespace, detect_namespace_mode, metadata_namespace, NamespaceMode,
+};
+use crate::pointer_list::{cluster_ptr, path_ptr, title_ptr};
+
+const MAX_REDIRECT_DEPTH: usize = 8;
+
+pub(crate) struct ClusterData {
+    pub bytes: Vec<u8>,
+    pub extended: bool,
+}
 
 /// Whether to verify the archive's MD5 checksum when opening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +68,7 @@ pub struct Archive {
     header: Header,
     mime_types: Vec<String>,
     namespace_mode: NamespaceMode,
+    cluster_cache: Mutex<LruCache<u32, Arc<ClusterData>>>,
 }
 
 impl Archive {
@@ -62,7 +78,7 @@ impl Archive {
     }
 
     /// Open a ZIM archive with explicit options.
-    pub fn open_with_options(path: impl AsRef<Path>, _opts: ArchiveOptions) -> Result<Self> {
+    pub fn open_with_options(path: impl AsRef<Path>, opts: ArchiveOptions) -> Result<Self> {
         let path = path.as_ref();
 
         if is_split_archive_path(path) {
@@ -82,12 +98,16 @@ impl Archive {
         let mime_types = parse_mime_table(&mmap, header.mime_list_pos)?;
         let namespace_mode = detect_namespace_mode(&header);
 
+        let cap = NonZeroUsize::new(opts.cluster_cache_size.max(1)).unwrap();
+        let cluster_cache = Mutex::new(LruCache::new(cap));
+
         Ok(Archive {
             mmap,
             path: path.to_path_buf(),
             header,
             mime_types,
             namespace_mode,
+            cluster_cache,
         })
     }
 
@@ -261,6 +281,133 @@ impl Archive {
             i += 1;
         }
         Ok(results)
+    }
+
+    // ── Content retrieval ────────────────────────────────────────────────
+
+    /// Retrieve the raw blob bytes for a content entry.
+    pub fn get_blob(&self, entry: &ContentEntry) -> Result<Vec<u8>> {
+        let cluster = self.get_cluster_data(entry.cluster_number)?;
+        extract_blob(&cluster.bytes, entry.blob_number, cluster.extended)
+    }
+
+    /// Follow a redirect chain to its final content entry. Returns
+    /// [`Error::RedirectLoop`] on a cycle or after [`MAX_REDIRECT_DEPTH`]
+    /// hops, and [`Error::RedirectIndexOutOfRange`] when the chain lands on
+    /// a missing or deprecated entry.
+    pub fn resolve_redirect(&self, entry: &RedirectEntry) -> Result<ContentEntry> {
+        let mut visited: HashSet<u32> = HashSet::new();
+        let mut current = entry.redirect_index;
+        for _ in 0..MAX_REDIRECT_DEPTH {
+            if !visited.insert(current) {
+                return Err(Error::RedirectLoop(current));
+            }
+            if current >= self.header.entry_count {
+                return Err(Error::RedirectIndexOutOfRange(current));
+            }
+            match self.dirent_at(current)? {
+                Some(Dirent::Content(c)) => return Ok(c),
+                Some(Dirent::Redirect(r)) => current = r.redirect_index,
+                None => return Err(Error::RedirectIndexOutOfRange(current)),
+            }
+        }
+        Err(Error::RedirectLoop(current))
+    }
+
+    /// Look up an article by `path` in the archive's article namespace,
+    /// transparently following any redirect, and return its decompressed
+    /// bytes wrapped in an [`Article`]. Returns `Ok(None)` if the path is
+    /// not present.
+    pub fn get_article(&self, path: &str) -> Result<Option<Article>> {
+        let Some(dirent) = self.find_by_path(None, path)? else {
+            return Ok(None);
+        };
+        self.article_from_dirent(dirent).map(Some)
+    }
+
+    /// Return the archive's main page, if one is declared in the header.
+    pub fn main_page(&self) -> Result<Option<Article>> {
+        let Some(idx) = self.header.main_page else {
+            return Ok(None);
+        };
+        if idx >= self.header.entry_count {
+            return Err(Error::RedirectIndexOutOfRange(idx));
+        }
+        let Some(dirent) = self.dirent_at(idx)? else {
+            return Ok(None);
+        };
+        self.article_from_dirent(dirent).map(Some)
+    }
+
+    /// Read a metadata value by key (e.g. "Title", "Language"). Looks in
+    /// namespace `M` on v6.1+ archives and `-` on v5. Returns `Ok(None)`
+    /// when the key is absent.
+    pub fn metadata(&self, key: &str) -> Result<Option<String>> {
+        let ns = metadata_namespace(self.namespace_mode);
+        let Some(dirent) = self.find_by_path(Some(ns), key)? else {
+            return Ok(None);
+        };
+        let content = match dirent {
+            Dirent::Content(c) => c,
+            Dirent::Redirect(r) => self.resolve_redirect(&r)?,
+        };
+        let bytes = self.get_blob(&content)?;
+        String::from_utf8(bytes)
+            .map(Some)
+            .map_err(|_| Error::InvalidUtf8(0))
+    }
+
+    fn article_from_dirent(&self, dirent: Dirent) -> Result<Article> {
+        let content = match dirent {
+            Dirent::Content(c) => c,
+            Dirent::Redirect(r) => self.resolve_redirect(&r)?,
+        };
+        let data = self.get_blob(&content)?;
+        Ok(Article {
+            entry: content,
+            data,
+        })
+    }
+
+    fn get_cluster_data(&self, cluster_number: u32) -> Result<Arc<ClusterData>> {
+        if cluster_number >= self.header.cluster_count {
+            return Err(Error::OffsetOutOfBounds {
+                offset: cluster_number as u64,
+                field: "cluster_number",
+            });
+        }
+        {
+            let mut cache = self.cluster_cache.lock().unwrap();
+            if let Some(data) = cache.get(&cluster_number) {
+                return Ok(Arc::clone(data));
+            }
+        }
+
+        let start = cluster_ptr(&self.mmap, self.header.cluster_ptr_pos, cluster_number)?;
+        let end = if cluster_number + 1 < self.header.cluster_count {
+            cluster_ptr(&self.mmap, self.header.cluster_ptr_pos, cluster_number + 1)?
+        } else {
+            self.header.checksum_pos
+        };
+        if start >= end || end > self.mmap.len() as u64 {
+            return Err(Error::OffsetOutOfBounds {
+                offset: end,
+                field: "cluster_range",
+            });
+        }
+
+        let info_byte = self.mmap[start as usize];
+        let info = ClusterInfo::from_byte(info_byte, self.header.major_version)?;
+        let payload = &self.mmap[(start as usize + 1)..end as usize];
+        let bytes = decompress(&info, payload)?;
+        let data = Arc::new(ClusterData {
+            bytes,
+            extended: info.extended,
+        });
+
+        let mut cache = self.cluster_cache.lock().unwrap();
+        cache.put(cluster_number, Arc::clone(&data));
+        Ok(data)
     }
 
     #[cfg(test)]
@@ -542,6 +689,27 @@ mod tests {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn content_at(
+        namespace: char,
+        path: &str,
+        title: &str,
+        mime_idx: u16,
+        cluster: u32,
+        blob: u32,
+    ) -> EntrySpec {
+        EntrySpec {
+            namespace,
+            path: path.into(),
+            title: title.into(),
+            kind: EntryKind::Content {
+                cluster,
+                blob,
+                mime_idx,
+            },
+        }
+    }
+
     fn redirect(
         namespace: char,
         path: &str,
@@ -569,8 +737,98 @@ mod tests {
         }
     }
 
-    /// Build a complete ZIM archive with the given entries.
+    #[derive(Clone, Debug)]
+    struct ClusterSpec {
+        compression: u8,
+        extended: bool,
+        blobs: Vec<Vec<u8>>,
+    }
+
+    fn uncompressed_cluster(blobs: &[&[u8]]) -> ClusterSpec {
+        ClusterSpec {
+            compression: 0x00,
+            extended: false,
+            blobs: blobs.iter().map(|b| b.to_vec()).collect(),
+        }
+    }
+
+    fn lzma2_cluster(blobs: &[&[u8]]) -> ClusterSpec {
+        ClusterSpec {
+            compression: 0x04,
+            extended: false,
+            blobs: blobs.iter().map(|b| b.to_vec()).collect(),
+        }
+    }
+
+    fn zstd_cluster(blobs: &[&[u8]]) -> ClusterSpec {
+        ClusterSpec {
+            compression: 0x05,
+            extended: false,
+            blobs: blobs.iter().map(|b| b.to_vec()).collect(),
+        }
+    }
+
+    fn encode_cluster(spec: &ClusterSpec) -> Vec<u8> {
+        let n = spec.blobs.len();
+        let offset_size: usize = if spec.extended { 8 } else { 4 };
+        let header_bytes = ((n + 1) * offset_size) as u64;
+
+        let mut payload = Vec::new();
+        let mut running = header_bytes;
+        for b in &spec.blobs {
+            if spec.extended {
+                payload.extend_from_slice(&running.to_le_bytes());
+            } else {
+                payload.extend_from_slice(&(running as u32).to_le_bytes());
+            }
+            running += b.len() as u64;
+        }
+        // sentinel offset
+        if spec.extended {
+            payload.extend_from_slice(&running.to_le_bytes());
+        } else {
+            payload.extend_from_slice(&(running as u32).to_le_bytes());
+        }
+        for b in &spec.blobs {
+            payload.extend_from_slice(b);
+        }
+
+        let compressed = match spec.compression {
+            0x00 | 0x01 => payload,
+            0x04 => {
+                use std::io::Write;
+                use xz2::write::XzEncoder;
+                let mut enc = XzEncoder::new(Vec::new(), 6);
+                enc.write_all(&payload).unwrap();
+                enc.finish().unwrap()
+            }
+            0x05 => zstd::encode_all(&payload[..], 3).unwrap(),
+            other => panic!("unsupported test cluster compression: 0x{other:02X}"),
+        };
+
+        let info_byte = spec.compression | if spec.extended { 0x10 } else { 0 };
+        let mut out = Vec::with_capacity(1 + compressed.len());
+        out.push(info_byte);
+        out.extend_from_slice(&compressed);
+        out
+    }
+
+    /// Build a complete ZIM archive with the given entries (no clusters, no
+    /// main page). Thin wrapper over [`build_zim_full`].
     fn build_zim(major: u16, minor: u16, mimes: &[&str], entries: &[EntrySpec]) -> Vec<u8> {
+        build_zim_full(major, minor, mimes, entries, &[], None)
+    }
+
+    /// Build a complete ZIM archive. `main_page` is resolved by
+    /// `(namespace, path)` against the sorted entries.
+    fn build_zim_full(
+        major: u16,
+        minor: u16,
+        mimes: &[&str],
+        entries: &[EntrySpec],
+        clusters: &[ClusterSpec],
+        main_page: Option<(char, &str)>,
+    ) -> Vec<u8> {
         // 1. Sort entries by (namespace, path) — this is the path pointer order
         //    and also gives us the entry_index for each input entry.
         let mut indexed: Vec<(usize, EntrySpec)> = entries.iter().cloned().enumerate().collect();
@@ -649,16 +907,32 @@ mod tests {
         }
         mime_bytes.push(0); // terminator
 
-        // 4. Layout: header | mime_list | path_ptr_list | title_ptr_list |
-        //            dirents | cluster_ptr_list | checksum
+        // 4. Encode clusters and compute layout:
+        //    header | mime_list | path_ptr_list | title_ptr_list |
+        //    dirents | cluster_ptr_list | cluster_0 ... cluster_{N-1} | checksum
         let entry_count = indexed.len();
+        let encoded_clusters: Vec<Vec<u8>> = clusters.iter().map(encode_cluster).collect();
+        let cluster_count = encoded_clusters.len();
+
         let mime_list_pos = HEADER_SIZE as u64;
         let path_ptr_pos = mime_list_pos + mime_bytes.len() as u64;
         let title_ptr_pos = path_ptr_pos + (entry_count as u64) * 8;
         let dirents_pos = title_ptr_pos + (entry_count as u64) * 4;
         let cluster_ptr_pos = dirents_pos + dirent_bytes.len() as u64;
-        let checksum_pos = cluster_ptr_pos; // zero clusters in Phase-2 tests
+        let clusters_start = cluster_ptr_pos + (cluster_count as u64) * 8;
+
+        let mut cluster_offsets = Vec::with_capacity(cluster_count);
+        let mut running = clusters_start;
+        for c in &encoded_clusters {
+            cluster_offsets.push(running);
+            running += c.len() as u64;
+        }
+        let checksum_pos = running;
         let file_len = checksum_pos + 16;
+
+        let main_page_idx = main_page
+            .and_then(|(ns, p)| path_to_idx.get(&(ns, p.to_string())).copied())
+            .unwrap_or(0xFFFF_FFFFu32);
 
         // Path pointers: absolute file offsets to each dirent.
         let mut path_ptr_bytes = Vec::with_capacity(entry_count * 8);
@@ -696,12 +970,12 @@ mod tests {
         buf.extend_from_slice(&minor.to_le_bytes());
         buf.extend_from_slice(&[0x22; 16]);
         buf.extend_from_slice(&(entry_count as u32).to_le_bytes());
-        buf.extend_from_slice(&0u32.to_le_bytes()); // cluster_count
+        buf.extend_from_slice(&(cluster_count as u32).to_le_bytes());
         buf.extend_from_slice(&path_ptr_pos.to_le_bytes());
         buf.extend_from_slice(&title_ptr_pos.to_le_bytes());
         buf.extend_from_slice(&cluster_ptr_pos.to_le_bytes());
         buf.extend_from_slice(&mime_list_pos.to_le_bytes());
-        buf.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes()); // main_page
+        buf.extend_from_slice(&main_page_idx.to_le_bytes());
         buf.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes()); // layout_page
         buf.extend_from_slice(&checksum_pos.to_le_bytes());
         assert_eq!(buf.len(), HEADER_SIZE);
@@ -713,6 +987,14 @@ mod tests {
         buf.extend_from_slice(&title_ptr_bytes);
         assert_eq!(buf.len() as u64, dirents_pos);
         buf.extend_from_slice(&dirent_bytes);
+        assert_eq!(buf.len() as u64, cluster_ptr_pos);
+        for off in &cluster_offsets {
+            buf.extend_from_slice(&off.to_le_bytes());
+        }
+        assert_eq!(buf.len() as u64, clusters_start);
+        for c in &encoded_clusters {
+            buf.extend_from_slice(c);
+        }
         assert_eq!(buf.len() as u64, checksum_pos);
         buf.extend_from_slice(&[0u8; 16]);
         assert_eq!(buf.len() as u64, file_len);
@@ -963,5 +1245,379 @@ mod tests {
         assert_eq!(d.path(), "c");
         // And "b" returns None because dirent_at returns Ok(None) for deprecated.
         assert!(a.find_by_path(None, "b").unwrap().is_none());
+    }
+
+    // ── Phase 3: blob retrieval, redirects, articles, metadata ───────────
+
+    /// Pull the content dirent at the given path, expecting success.
+    fn content_at_path(a: &Archive, ns: char, p: &str) -> ContentEntry {
+        match a.find_by_path(Some(ns), p).unwrap().unwrap() {
+            Dirent::Content(c) => c,
+            Dirent::Redirect(_) => panic!("expected Content at {ns}/{p}, got redirect"),
+        }
+    }
+
+    #[test]
+    fn get_blob_uncompressed_cluster() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[
+                content_at('C', "one", "", 0, 0, 0),
+                content_at('C', "two", "", 0, 0, 1),
+            ],
+            &[uncompressed_cluster(&[
+                b"<html>one</html>",
+                b"<html>two</html>",
+            ])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let one = content_at_path(&a, 'C', "one");
+        let two = content_at_path(&a, 'C', "two");
+        assert_eq!(a.get_blob(&one).unwrap(), b"<html>one</html>");
+        assert_eq!(a.get_blob(&two).unwrap(), b"<html>two</html>");
+    }
+
+    #[test]
+    fn get_blob_lzma2_cluster() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[content_at('C', "page", "", 0, 0, 0)],
+            &[lzma2_cluster(&[b"lzma-compressed content"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let c = content_at_path(&a, 'C', "page");
+        assert_eq!(a.get_blob(&c).unwrap(), b"lzma-compressed content");
+    }
+
+    #[test]
+    fn get_blob_zstd_cluster() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[content_at('C', "page", "", 0, 0, 0)],
+            &[zstd_cluster(&[b"zstd-compressed content"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let c = content_at_path(&a, 'C', "page");
+        assert_eq!(a.get_blob(&c).unwrap(), b"zstd-compressed content");
+    }
+
+    #[test]
+    fn get_blob_extended_cluster_on_v6() {
+        let spec = ClusterSpec {
+            compression: 0x00,
+            extended: true,
+            blobs: vec![b"aa".to_vec(), b"bbbb".to_vec()],
+        };
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[
+                content_at('C', "a", "", 0, 0, 0),
+                content_at('C', "b", "", 0, 0, 1),
+            ],
+            &[spec],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let ca = content_at_path(&a, 'C', "a");
+        let cb = content_at_path(&a, 'C', "b");
+        assert_eq!(a.get_blob(&ca).unwrap(), b"aa");
+        assert_eq!(a.get_blob(&cb).unwrap(), b"bbbb");
+    }
+
+    #[test]
+    fn get_blob_extended_rejected_on_v5() {
+        let spec = ClusterSpec {
+            compression: 0x00,
+            extended: true,
+            blobs: vec![b"x".to_vec()],
+        };
+        let bytes = build_zim_full(
+            5,
+            0,
+            &["text/html"],
+            &[content_at('A', "p", "", 0, 0, 0)],
+            &[spec],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let c = content_at_path(&a, 'A', "p");
+        assert!(matches!(a.get_blob(&c), Err(Error::ExtendedClusterInV5)));
+    }
+
+    #[test]
+    fn resolve_redirect_simple_chain() {
+        // Home → Main_Page. Sorted: ["Home", "Main_Page"] → indices 0, 1.
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[
+                content_at('C', "Main_Page", "Main Page", 0, 0, 0),
+                redirect('C', "Home", "Home", 'C', "Main_Page"),
+            ],
+            &[uncompressed_cluster(&[b"main page html"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let d = a.find_by_path(None, "Home").unwrap().unwrap();
+        let Dirent::Redirect(r) = d else {
+            panic!("expected redirect");
+        };
+        let resolved = a.resolve_redirect(&r).unwrap();
+        assert_eq!(resolved.path, "Main_Page");
+        assert_eq!(a.get_blob(&resolved).unwrap(), b"main page html");
+    }
+
+    #[test]
+    fn resolve_redirect_two_hop_chain() {
+        // r1 → r2 → c.
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[
+                content_at('C', "final", "", 0, 0, 0),
+                redirect('C', "a_r1", "", 'C', "b_r2"),
+                redirect('C', "b_r2", "", 'C', "final"),
+            ],
+            &[uncompressed_cluster(&[b"final bytes"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let Dirent::Redirect(r) = a.find_by_path(None, "a_r1").unwrap().unwrap() else {
+            panic!("expected redirect");
+        };
+        let resolved = a.resolve_redirect(&r).unwrap();
+        assert_eq!(resolved.path, "final");
+    }
+
+    #[test]
+    fn resolve_redirect_cycle_is_detected() {
+        // alpha → beta → alpha.
+        let bytes = build_zim(
+            6,
+            1,
+            &["text/html"],
+            &[
+                redirect('C', "alpha", "", 'C', "beta"),
+                redirect('C', "beta", "", 'C', "alpha"),
+            ],
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let Dirent::Redirect(r) = a.find_by_path(None, "alpha").unwrap().unwrap() else {
+            panic!("expected redirect");
+        };
+        assert!(matches!(
+            a.resolve_redirect(&r),
+            Err(Error::RedirectLoop(_))
+        ));
+    }
+
+    #[test]
+    fn resolve_redirect_target_is_deprecated() {
+        let bytes = build_zim(
+            6,
+            1,
+            &["text/html"],
+            &[
+                redirect('C', "alias", "", 'C', "gone"),
+                deprecated('C', "gone"),
+            ],
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let Dirent::Redirect(r) = a.find_by_path(None, "alias").unwrap().unwrap() else {
+            panic!("expected redirect");
+        };
+        assert!(matches!(
+            a.resolve_redirect(&r),
+            Err(Error::RedirectIndexOutOfRange(_))
+        ));
+    }
+
+    #[test]
+    fn get_article_follows_redirect() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[
+                content_at('C', "Main_Page", "Main Page", 0, 0, 0),
+                redirect('C', "Home", "Home", 'C', "Main_Page"),
+            ],
+            &[uncompressed_cluster(&[b"<h1>Main</h1>"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let art = a.get_article("Home").unwrap().unwrap();
+        assert_eq!(art.entry.path, "Main_Page");
+        assert_eq!(art.data, b"<h1>Main</h1>");
+        assert_eq!(art.as_text(), Some("<h1>Main</h1>"));
+        assert_eq!(art.mime_type(&a), "text/html");
+        assert!(!art.is_binary());
+    }
+
+    #[test]
+    fn get_article_missing_returns_none() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[content_at('C', "Exists", "", 0, 0, 0)],
+            &[uncompressed_cluster(&[b"x"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        assert!(a.get_article("Missing").unwrap().is_none());
+    }
+
+    #[test]
+    fn main_page_when_set() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[
+                content_at('C', "Apple", "", 0, 0, 0),
+                content_at('C', "Main_Page", "", 0, 0, 1),
+            ],
+            &[uncompressed_cluster(&[b"apple", b"main page body"])],
+            Some(('C', "Main_Page")),
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let mp = a.main_page().unwrap().unwrap();
+        assert_eq!(mp.entry.path, "Main_Page");
+        assert_eq!(mp.data, b"main page body");
+    }
+
+    #[test]
+    fn main_page_when_absent() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[content_at('C', "only", "", 0, 0, 0)],
+            &[uncompressed_cluster(&[b"only bytes"])],
+            None, // main_page sentinel 0xFFFFFFFF
+        );
+        let (_f, a) = open_bytes(&bytes);
+        assert!(a.main_page().unwrap().is_none());
+    }
+
+    #[test]
+    fn metadata_v6_uses_m_namespace() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/plain"],
+            &[content_at('M', "Title", "", 0, 0, 0)],
+            &[uncompressed_cluster(&[b"Wikipedia"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        assert_eq!(a.metadata("Title").unwrap().as_deref(), Some("Wikipedia"));
+        assert!(a.metadata("Missing").unwrap().is_none());
+    }
+
+    #[test]
+    fn metadata_v5_uses_dash_namespace() {
+        let bytes = build_zim_full(
+            5,
+            0,
+            &["text/plain"],
+            &[content_at('-', "Title", "", 0, 0, 0)],
+            &[uncompressed_cluster(&[b"OldZim"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        assert_eq!(a.metadata("Title").unwrap().as_deref(), Some("OldZim"));
+    }
+
+    #[test]
+    fn metadata_invalid_utf8_errors() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["application/octet-stream"],
+            &[content_at('M', "Raw", "", 0, 0, 0)],
+            &[uncompressed_cluster(&[&[0xFF, 0xFE, 0xFD]])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        assert!(matches!(a.metadata("Raw"), Err(Error::InvalidUtf8(_))));
+    }
+
+    #[test]
+    fn cache_smoke_get_blob_is_idempotent() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[content_at('C', "p", "", 0, 0, 0)],
+            &[zstd_cluster(&[b"cached"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let c = content_at_path(&a, 'C', "p");
+        let first = a.get_blob(&c).unwrap();
+        let second = a.get_blob(&c).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first, b"cached");
+    }
+
+    #[test]
+    fn get_blob_across_multiple_clusters() {
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[
+                content_at('C', "a", "", 0, 0, 0),
+                content_at('C', "b", "", 0, 1, 0),
+                content_at('C', "c", "", 0, 1, 1),
+            ],
+            &[
+                uncompressed_cluster(&[b"aaa"]),
+                zstd_cluster(&[b"bbb", b"ccc"]),
+            ],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        assert_eq!(a.get_blob(&content_at_path(&a, 'C', "a")).unwrap(), b"aaa");
+        assert_eq!(a.get_blob(&content_at_path(&a, 'C', "b")).unwrap(), b"bbb");
+        assert_eq!(a.get_blob(&content_at_path(&a, 'C', "c")).unwrap(), b"ccc");
+    }
+
+    #[test]
+    fn get_blob_rejects_out_of_range_cluster() {
+        // Construct a content entry whose cluster_number is 99 but only 1
+        // cluster exists.  The dirent itself parses fine; get_blob must fail.
+        let bytes = build_zim_full(
+            6,
+            1,
+            &["text/html"],
+            &[content_at('C', "p", "", 0, 99, 0)],
+            &[uncompressed_cluster(&[b"x"])],
+            None,
+        );
+        let (_f, a) = open_bytes(&bytes);
+        let c = content_at_path(&a, 'C', "p");
+        assert!(matches!(
+            a.get_blob(&c),
+            Err(Error::OffsetOutOfBounds {
+                field: "cluster_number",
+                ..
+            })
+        ));
     }
 }

@@ -20,6 +20,15 @@ pub(crate) fn title_ptr(buf: &[u8], title_ptr_pos: u64, idx: u32) -> Result<u32>
     read_u32_le(buf, off as usize, "title_ptr")
 }
 
+/// Read the file offset of cluster `idx` from the cluster pointer list. Each
+/// pointer is 8 bytes.
+pub(crate) fn cluster_ptr(buf: &[u8], cluster_ptr_pos: u64, idx: u32) -> Result<u64> {
+    let off = cluster_ptr_pos
+        .checked_add((idx as u64) * 8)
+        .expect("cluster pointer offset overflow");
+    read_u64_le(buf, off as usize, "cluster_ptr")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,6 +70,26 @@ mod tests {
         let buf = vec![0u8; 4];
         assert!(matches!(
             title_ptr(&buf, 4, 0),
+            Err(Error::OffsetOutOfBounds { .. })
+        ));
+    }
+
+    #[test]
+    fn cluster_ptr_reads_correct_offset() {
+        let mut buf = vec![0xCC; 8];
+        buf.extend_from_slice(&1000u64.to_le_bytes());
+        buf.extend_from_slice(&2000u64.to_le_bytes());
+        buf.extend_from_slice(&3000u64.to_le_bytes());
+        assert_eq!(cluster_ptr(&buf, 8, 0).unwrap(), 1000);
+        assert_eq!(cluster_ptr(&buf, 8, 1).unwrap(), 2000);
+        assert_eq!(cluster_ptr(&buf, 8, 2).unwrap(), 3000);
+    }
+
+    #[test]
+    fn cluster_ptr_out_of_bounds() {
+        let buf = vec![0u8; 8];
+        assert!(matches!(
+            cluster_ptr(&buf, 8, 0),
             Err(Error::OffsetOutOfBounds { .. })
         ));
     }

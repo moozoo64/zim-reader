@@ -23,6 +23,8 @@
 //! [ZIM archive files]: https://wiki.openzim.org/wiki/ZIM_file_format
 
 mod archive;
+mod article;
+mod cluster;
 mod dirent;
 mod error;
 mod header;
@@ -32,6 +34,7 @@ mod pointer_list;
 mod util;
 
 pub use archive::{Archive, ArchiveOptions, ArticleIter, EntryIter, VerifyChecksum};
+pub use article::Article;
 pub use dirent::{ContentEntry, Dirent, RedirectEntry};
 pub use error::{Error, Result};
 pub use header::Header;

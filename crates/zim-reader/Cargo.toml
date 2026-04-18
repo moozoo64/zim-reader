@@ -11,6 +11,15 @@ categories = ["encoding", "parsing"]
 [dependencies]
 memmap2 = "0.9"
 thiserror = "1"
+lru = "0.12"
+lzma-rs = { version = "0.3", optional = true }
+ruzstd = { version = "0.7", optional = true }
+
+[features]
+default = ["compression-pure"]
+compression-pure = ["dep:lzma-rs", "dep:ruzstd"]
 
 [dev-dependencies]
 tempfile = "3"
+xz2 = "0.1"
+zstd = "0.13"

@@ -1,0 +1,29 @@
+# Rust build artifacts
+/target
+**/target
+
+# Cargo lock is kept for the workspace; uncomment below if this becomes a library-only repo
+# Cargo.lock
+
+# Backup files produced by rustfmt / editors
+**/*.rs.bk
+*.swp
+*~
+
+# Editor / IDE
+.vscode/
+.idea/
+*.iml
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Local samples and scratch ZIM archives — large binaries should not be committed
+/samples/*.zim
+/samples/*.zim.*
+/scratch/
+
+# Environment / local overrides
+.env
+.env.local
