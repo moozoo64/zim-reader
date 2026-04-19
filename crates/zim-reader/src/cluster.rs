@@ -83,7 +83,7 @@ pub(crate) fn extract_blob(
     };
 
     let first = read_off(0)? as usize;
-    if first < offset_size || first % offset_size != 0 {
+    if first < offset_size || !first.is_multiple_of(offset_size) {
         return Err(Error::OffsetOutOfBounds {
             offset: first as u64,
             field: "cluster_first_offset",

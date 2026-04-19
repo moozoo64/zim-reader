@@ -2,7 +2,7 @@
 name = "zim-reader"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 description = "Pure-Rust library for reading ZIM archive files"
 license = "MIT OR Apache-2.0"
 authors = ["Michael Simmons <moozoo.wizard@gmail.com>"]

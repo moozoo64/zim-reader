@@ -29,8 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Bumped to Rust edition 2024 and MSRV 1.85. Forced by a transitive
-  `lzma-rs → crc 3.4.0` dependency requiring rustc 1.83+; we took the
-  upgrade as an opportunity to move to the current edition.
+- Bumped to Rust edition 2024 and MSRV 1.95 (current stable). The
+  immediate driver was transitive deps (`lzma-rs → crc 3.4.0` needs
+  rustc 1.83+; `ruzstd 0.8.2` uses `u*::is_multiple_of`, stabilised
+  in 1.87); aligning on current stable avoids chasing the next one.
+- Dependency bumps: `thiserror` 1 → 2, `lru` 0.12 → 0.17, `md-5` 0.10 →
+  0.11, `ruzstd` 0.7 → 0.8. `ruzstd::StreamingDecoder` moved under
+  `ruzstd::decoding::`.
 
 [openzim/zim-testing-suite]: https://github.com/openzim/zim-testing-suite
