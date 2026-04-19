@@ -38,8 +38,9 @@ The spec lays out phases; work is landing phase-by-phase.
 - Phase 1 (header, MIME, namespace) — **done**
 - Phase 2 (dirent parsing, binary search, iteration) — **done**
 - Phase 3 (cluster decompression, blob extraction, `get_article`/`main_page`/`metadata`, LRU cache) — **done**
-- Phase 4 (MD5 checksum verification, `compression-native` feature, fuzz targets, split archives) — not started
-- Phase 5 (repo polish: license files, CI workflow, CHANGELOG) — not started
+- Phase 4 (MD5 checksum verification) — **done**. `compression-native` feature, fuzz targets, and split-archive reads remain deferred.
+- Phase 5 (repo polish: license files, CI workflow, CHANGELOG, authorship disclosure) — **done**
+- Phase 6 (real-ZIM integration tests via `openzim/zim-testing-suite` submodule) — **done**. Error-path tests against `invalid.*.zim` fixtures remain deferred.
 
 When starting a new phase, first write a plan in `~/.claude/plans/` and get it approved before implementing.
 

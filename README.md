@@ -16,7 +16,7 @@ A note on copyright: in most jurisdictions (notably the United States), output p
 
 ## Status
 
-Early, usable. Phase 4 of the implementation plan is complete:
+Early, usable. Phases 1–6 of the implementation plan are complete:
 
 - [x] Header, MIME list, and namespace detection (v5 and v6)
 - [x] Directory-entry parsing (content + redirect)
@@ -26,8 +26,10 @@ Early, usable. Phase 4 of the implementation plan is complete:
 - [x] `get_article`, `main_page`, `metadata`, redirect resolution with cycle detection
 - [x] LRU cluster cache
 - [x] MD5 checksum verification (streamed, opt-out via `VerifyChecksum::Skip`)
+- [x] Integration tests against the [openzim/zim-testing-suite] v5/v6 fixtures
 - [ ] Optional native codecs (`xz2`, `zstd` as runtime deps) (future phase)
 - [ ] Split-archive read support beyond detection (future phase)
+- [ ] Fuzz targets (future phase)
 
 ## Quick start
 
@@ -56,7 +58,7 @@ if let Some(article) = archive.main_page()? {
     }
 }
 
-if let Some(article) = archive.get_article("A/Rust_(programming_language)")? {
+if let Some(article) = archive.get_article("Rust_(programming_language)")? {
     println!("{} bytes, mime: {}", article.data.len(), article.mime_type(&archive));
 }
 
@@ -110,7 +112,7 @@ The spec this implementation follows lives in [docs/zim-reader-spec.md](docs/zim
 # Build
 cargo build
 
-# Test (currently ~88 unit + integration tests, all synthetic)
+# Test (94 unit + 8 integration + 1 doctest on the in-repo submodule)
 cargo test
 
 # Lint
@@ -120,7 +122,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 ```
 
-All in-module tests build synthetic ZIM archives in-process — no fixture files are committed directly. LZMA2 and Zstd test clusters are encoded at test time with `xz2` and `zstd` dev-dependencies.
+In-module tests build synthetic ZIM archives in-process — no fixture files are committed directly. LZMA2 and Zstd test clusters are encoded at test time with `xz2` and `zstd` dev-dependencies. Integration tests under `crates/zim-reader/tests/` run against real libzim-produced ZIM files from a git submodule (see below).
 
 Integration tests under `crates/zim-reader/tests/` read real libzim-produced ZIM files from the [openzim/zim-testing-suite] git submodule. Initialise it with:
 
