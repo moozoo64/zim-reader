@@ -6,7 +6,9 @@
       "Bash(cargo clippy *)",
       "Bash(cargo fmt *)",
       "Bash(grep -vE '^\\(target/|crates/|docs/|\\\\.claude/|Cargo\\\\.\\(toml|lock\\)$|\\\\.gitignore$|CLAUDE\\\\.md$|README\\\\.md$\\)')",
-      "Bash(cargo doc *)"
+      "Bash(cargo doc *)",
+      "Bash(cargo rustdoc *)",
+      "Bash(RUSTDOCFLAGS=\"-W missing_docs\" cargo rustdoc -p zim-reader)"
     ],
     "additionalDirectories": [
       "/home/michael-simmons/.claude/plans"
