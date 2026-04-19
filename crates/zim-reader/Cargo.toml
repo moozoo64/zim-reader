@@ -13,20 +13,20 @@ readme = "../../README.md"
 keywords = ["zim", "wikipedia", "kiwix", "openzim", "offline"]
 categories = ["encoding", "parsing"]
 include = [
-    "src/**/*.rs",
-    "Cargo.toml",
-    "LICENSE-MIT",
-    "LICENSE-APACHE",
-    "CHANGELOG.md",
+  "src/**/*.rs",
+  "Cargo.toml",
+  "LICENSE-MIT",
+  "LICENSE-APACHE",
+  "CHANGELOG.md",
 ]
 
 [dependencies]
 memmap2 = "0.9"
-thiserror = "1"
-lru = "0.12"
-md-5 = "0.10"
+thiserror = "2.0.18"
+lru = "0.17.0"
+md-5 = "0.11.0"
 lzma-rs = { version = "0.3", optional = true }
-ruzstd = { version = "0.7", optional = true }
+ruzstd = { version = "0.8.2", optional = true }
 
 [features]
 default = ["compression-pure"]

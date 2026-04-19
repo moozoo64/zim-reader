@@ -50,7 +50,7 @@ pub(crate) fn decompress(info: &ClusterInfo, data: &[u8]) -> Result<Vec<u8>> {
         #[cfg(feature = "compression-pure")]
         COMPRESSION_ZSTD => {
             use std::io::Read;
-            let mut decoder = ruzstd::StreamingDecoder::new(data)
+            let mut decoder = ruzstd::decoding::StreamingDecoder::new(data)
                 .map_err(|e| Error::ZstdDecompress(e.to_string()))?;
             let mut out = Vec::new();
             decoder
