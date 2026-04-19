@@ -810,8 +810,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 [package]
 name = "zim-reader"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.75"
+edition = "2024"
+rust-version = "1.85"
 description = "Pure-Rust library for reading ZIM archive files"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/<org>/zim-reader"
@@ -1132,7 +1132,7 @@ Target: hot retrieval of a typical Wikipedia article (50 KB HTML) in < 5 ms on a
 
 1. **API review** — compare public API against actual usage patterns in `zim-mcp` prototype; adjust before stabilisation
 2. **Semver stability commitment** — finalise which types are `#[non_exhaustive]`
-3. **Minimum Supported Rust Version (MSRV)** — nail down to `1.75` and test in CI with `rust-toolchain.toml`
+3. **Minimum Supported Rust Version (MSRV)** — nail down to `1.85` and test in CI with `rust-toolchain.toml`
 4. **crates.io publication** — `cargo publish` with all metadata fields populated
 5. **GitHub release** — tag `v0.5.0`, automated by `publish.yml`
 6. **README** — full README with:
@@ -1197,7 +1197,7 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
-      - uses: dtolnay/rust-toolchain@1.75
+      - uses: dtolnay/rust-toolchain@1.85
       - run: cargo build   # default features only
 
   fuzz:

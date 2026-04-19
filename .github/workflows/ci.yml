@@ -26,12 +26,12 @@ jobs:
       - run: cargo test -p zim-reader --all-features
 
   msrv:
-    name: Build (MSRV 1.75)
+    name: Build (MSRV 1.85)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: dtolnay/rust-toolchain@1.75.0
+      - uses: dtolnay/rust-toolchain@1.85.0
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p zim-reader

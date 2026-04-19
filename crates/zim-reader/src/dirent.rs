@@ -250,8 +250,8 @@ mod tests {
         buf.push(0);
         buf.push(namespace as u8);
         buf.extend_from_slice(&0u32.to_le_bytes()); // revision
-                                                    // Use content layout; ZIM stores deprecated entries with the same
-                                                    // shape, differing only in mime_type_idx.
+        // Use content layout; ZIM stores deprecated entries with the same
+        // shape, differing only in mime_type_idx.
         buf.extend_from_slice(&0u32.to_le_bytes()); // cluster
         buf.extend_from_slice(&0u32.to_le_bytes()); // blob
         buf.extend_from_slice(path.as_bytes());

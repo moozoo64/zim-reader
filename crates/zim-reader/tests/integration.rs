@@ -1,7 +1,7 @@
 mod common;
 
 use common::with_fixture;
-use zim_reader::{article_namespace, Archive, NamespaceMode};
+use zim_reader::{Archive, NamespaceMode, article_namespace};
 
 #[test]
 fn test_open_v5_small() {

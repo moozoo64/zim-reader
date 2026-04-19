@@ -43,4 +43,4 @@ pub use article::Article;
 pub use dirent::{ContentEntry, Dirent, RedirectEntry};
 pub use error::{Error, Result};
 pub use header::Header;
-pub use namespace::{article_namespace, metadata_namespace, Namespace, NamespaceMode};
+pub use namespace::{Namespace, NamespaceMode, article_namespace, metadata_namespace};

@@ -27,4 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `crates/zim-reader/tests/fixtures/`. Tests skip gracefully when the
   submodule is not initialised.
 
+### Changed
+
+- Bumped to Rust edition 2024 and MSRV 1.85. Forced by a transitive
+  `lzma-rs → crc 3.4.0` dependency requiring rustc 1.83+; we took the
+  upgrade as an opportunity to move to the current edition.
+
 [openzim/zim-testing-suite]: https://github.com/openzim/zim-testing-suite

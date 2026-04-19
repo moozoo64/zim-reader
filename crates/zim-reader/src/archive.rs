@@ -9,13 +9,13 @@ use lru::LruCache;
 use memmap2::{Mmap, MmapOptions};
 
 use crate::article::Article;
-use crate::cluster::{decompress, extract_blob, ClusterInfo};
-use crate::dirent::{read_path_sort_key, read_title_sort_key, ContentEntry, Dirent, RedirectEntry};
+use crate::cluster::{ClusterInfo, decompress, extract_blob};
+use crate::dirent::{ContentEntry, Dirent, RedirectEntry, read_path_sort_key, read_title_sort_key};
 use crate::error::{Error, Result};
-use crate::header::{Header, HEADER_SIZE};
+use crate::header::{HEADER_SIZE, Header};
 use crate::mime::parse_mime_table;
 use crate::namespace::{
-    article_namespace, detect_namespace_mode, metadata_namespace, NamespaceMode,
+    NamespaceMode, article_namespace, detect_namespace_mode, metadata_namespace,
 };
 use crate::pointer_list::{cluster_ptr, path_ptr, title_ptr};
 
@@ -1016,7 +1016,7 @@ mod tests {
                 (sorted_i as u32, (e.namespace, effective_title))
             })
             .collect();
-        title_sort.sort_by(|a, b| (a.1 .0 as u32, &a.1 .1).cmp(&(b.1 .0 as u32, &b.1 .1)));
+        title_sort.sort_by(|a, b| (a.1.0 as u32, &a.1.1).cmp(&(b.1.0 as u32, &b.1.1)));
 
         let mut title_ptr_bytes = Vec::with_capacity(entry_count * 4);
         for (entry_idx, _) in &title_sort {
