@@ -5,8 +5,20 @@ edition = "2021"
 rust-version = "1.75"
 description = "Pure-Rust library for reading ZIM archive files"
 license = "MIT OR Apache-2.0"
+authors = ["Michael Simmons <moozoo.wizard@gmail.com>"]
+repository = "https://github.com/moozoo64/zim-reader"
+homepage = "https://github.com/moozoo64/zim-reader"
+documentation = "https://docs.rs/zim-reader"
+readme = "../../README.md"
 keywords = ["zim", "wikipedia", "kiwix", "openzim", "offline"]
 categories = ["encoding", "parsing"]
+include = [
+    "src/**/*.rs",
+    "Cargo.toml",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "CHANGELOG.md",
+]
 
 [dependencies]
 memmap2 = "0.9"
