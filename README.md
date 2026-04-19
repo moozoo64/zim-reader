@@ -4,6 +4,16 @@ A pure-Rust, read-only library for [ZIM archive files] — the offline content f
 
 `zim-reader` opens a ZIM file, parses its header and indexes, and serves articles and metadata on demand. It is designed as a building block for higher-level tools (search, MCP servers, CLI readers) that need offline ZIM access without shelling out to `libzim`.
 
+> ⚠️ **Early release.** This is pre-1.0 software and may not work correctly on every archive. It has been exercised against synthetic in-process fixtures but not yet against the full range of real-world ZIM files. Expect bugs, rough edges, and API changes before `1.0`. Do not rely on it for anything load-bearing.
+
+## Authorship and AI disclosure
+
+This crate was **vibe-coded by Michael Simmons using [Claude Code] with the Claude Opus 4.7 model.** Effectively all of the Rust source, tests, documentation, and CI configuration were produced by the AI under iterative human direction — architectural decisions, scope calls, and review were mine; the keystrokes were largely the model's.
+
+A note on copyright: in most jurisdictions (notably the United States), output produced primarily by a generative AI model is **not eligible for copyright protection** without a substantive creative contribution from a human author. The extent to which this repository is copyrightable is therefore genuinely uncertain, and the dual MIT / Apache-2.0 licence offered here should be read as a best-effort grant over whatever protectable expression does exist (prompt engineering, selection, arrangement, edits). If you re-use the code and care about provenance, treat it closer to public-domain-ish than to a conventional hand-written library, and check the current state of AI-copyright law in your own jurisdiction.
+
+[Claude Code]: https://www.anthropic.com/claude-code
+
 ## Status
 
 Early, usable. Phase 4 of the implementation plan is complete:
