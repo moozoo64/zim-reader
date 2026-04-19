@@ -120,6 +120,9 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 # Format
 cargo fmt --check
+
+# Inspect a ZIM archive (debug tool, not published)
+cargo run -p zim-info -- path/to/archive.zim
 ```
 
 In-module tests build synthetic ZIM archives in-process — no fixture files are committed directly. LZMA2 and Zstd test clusters are encoded at test time with `xz2` and `zstd` dev-dependencies. Integration tests under `crates/zim-reader/tests/` run against real libzim-produced ZIM files from a git submodule (see below).

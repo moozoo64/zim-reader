@@ -10,6 +10,7 @@ const U32_ABSENT: u32 = 0xFFFF_FFFF;
 /// Parsed once at archive open. All offsets are byte positions from the
 /// start of the file.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Header {
     /// Fixed magic number `0x044D495A` identifying the file as a ZIM archive.
     pub magic_number: u32,

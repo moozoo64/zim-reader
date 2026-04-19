@@ -1,0 +1,10 @@
+[package]
+name = "zim-info"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+description = "Debug tool: prints ZIM archive header and MIME types."
+
+[dependencies]
+zim-reader = { path = "../../crates/zim-reader" }

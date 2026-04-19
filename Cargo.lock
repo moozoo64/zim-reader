@@ -674,6 +674,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zim-info"
+version = "0.1.0"
+dependencies = [
+ "zim-reader",
+]
+
+[[package]]
 name = "zim-reader"
 version = "0.1.0"
 dependencies = [

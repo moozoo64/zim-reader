@@ -6,6 +6,7 @@ use thiserror::Error;
 /// offsets, decompression errors, and MD5 mismatch. The `#[error]` message
 /// on each variant is the user-facing description.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

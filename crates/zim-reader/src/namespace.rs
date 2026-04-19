@@ -2,6 +2,7 @@ use crate::header::Header;
 
 /// Which namespace convention an archive uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NamespaceMode {
     /// v6.1+ unified namespace (`C` for content, `M` for metadata, `W` for well-known).
     New,
@@ -16,6 +17,7 @@ pub enum NamespaceMode {
 /// for code that needs to tag entries by role without caring whether the
 /// archive is v5 or v6.1+.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Namespace {
     /// `C` in New mode, `A` in Legacy mode.
     Content,

@@ -22,8 +22,8 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy -p zim-reader --all-targets --all-features -- -D warnings
-      - run: cargo test -p zim-reader --all-features
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --all-features
 
   msrv:
     name: Build (MSRV 1.95)

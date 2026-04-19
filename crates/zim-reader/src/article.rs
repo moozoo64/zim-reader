@@ -4,6 +4,7 @@ use crate::dirent::ContentEntry;
 /// A fully resolved article: its content dirent plus the decompressed blob
 /// bytes. Produced by [`Archive::get_article`] and [`Archive::main_page`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Article {
     /// Content dirent this article resolves to. When the caller-provided
     /// path was a redirect, this is the final target after chain

@@ -28,6 +28,7 @@ pub(crate) struct ClusterData {
 
 /// Whether to verify the archive's MD5 checksum when opening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum VerifyChecksum {
     /// Stream the file body through MD5 and compare to the stored digest.
     Yes,
@@ -36,7 +37,11 @@ pub enum VerifyChecksum {
 }
 
 /// Configuration for opening a ZIM archive.
+///
+/// This struct is `#[non_exhaustive]`: construct it via
+/// [`ArchiveOptions::default`] and assign the fields you care about.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ArchiveOptions {
     /// Whether to verify the MD5 checksum on open.
     ///

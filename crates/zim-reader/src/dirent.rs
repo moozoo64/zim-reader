@@ -15,6 +15,7 @@ const REDIRECT_PATH_OFFSET: usize = 12;
 /// represented here — parsing code returns `None` for them, and callers
 /// skip them.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Dirent {
     /// A content entry: path + title + location of its blob.
     Content(ContentEntry),
@@ -24,6 +25,7 @@ pub enum Dirent {
 
 /// A directory entry pointing at an actual piece of content.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ContentEntry {
     /// Index into the archive's MIME table.
     pub mime_type_idx: u16,
@@ -43,6 +45,7 @@ pub struct ContentEntry {
 
 /// A directory entry that redirects to another dirent.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RedirectEntry {
     /// Namespace of this redirect (not of the target).
     pub namespace: char,
