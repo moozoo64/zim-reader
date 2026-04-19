@@ -15,6 +15,9 @@
 .idea/
 *.iml
 
+# Claude AI local data and cache
+.claude/
+
 # OS junk
 .DS_Store
 Thumbs.db
