@@ -1,0 +1,4 @@
+[submodule "crates/zim-reader/tests/fixtures"]
+	path = crates/zim-reader/tests/fixtures
+	url = https://github.com/openzim/zim-testing-suite.git
+	shallow = true

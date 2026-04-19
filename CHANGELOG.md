@@ -22,3 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MD5 checksum verification on open, streamed in 4 MB chunks. Opt out via
   `ArchiveOptions { verify_checksum: VerifyChecksum::Skip, .. }`.
 - `compression-pure` feature (default) selecting pure-Rust decoders.
+- Integration tests against the [openzim/zim-testing-suite] v5 and v6
+  `small.zim` fixtures, wired in as a shallow git submodule at
+  `crates/zim-reader/tests/fixtures/`. Tests skip gracefully when the
+  submodule is not initialised.
+
+[openzim/zim-testing-suite]: https://github.com/openzim/zim-testing-suite

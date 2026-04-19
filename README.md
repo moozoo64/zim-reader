@@ -120,7 +120,17 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 ```
 
-All tests build synthetic ZIM archives in-process — no fixture files are checked into the repo. LZMA2 and Zstd test clusters are encoded at test time with `xz2` and `zstd` dev-dependencies.
+All in-module tests build synthetic ZIM archives in-process — no fixture files are committed directly. LZMA2 and Zstd test clusters are encoded at test time with `xz2` and `zstd` dev-dependencies.
+
+Integration tests under `crates/zim-reader/tests/` read real libzim-produced ZIM files from the [openzim/zim-testing-suite] git submodule. Initialise it with:
+
+```bash
+git submodule update --init --recursive
+```
+
+Integration tests `SKIP` cleanly on a fresh clone without the submodule, so `cargo test` stays green either way.
+
+[openzim/zim-testing-suite]: https://github.com/openzim/zim-testing-suite
 
 ## License
 
